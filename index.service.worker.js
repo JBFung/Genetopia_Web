@@ -4,7 +4,7 @@
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1792216192|39966441';
+const CACHE_VERSION = '1792222171|37455912';
 /** @type {string} */
 const CACHE_PREFIX = 'Genetopia (復刻原型)-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
@@ -75,7 +75,7 @@ async function fetchAndCache(event, cache, isCacheable) {
 	let response = await event.preloadResponse;
 	if (response == null) {
 		// Or, go over network.
-		response = await self.fetch(event.request);
+		response = await self.fetch(event.request.mode === 'navigate' ? new Request(event.request.url, { cache: 'no-cache' }) : event.request);
 	}
 
 	if (ENSURE_CROSSORIGIN_ISOLATION_HEADERS) {

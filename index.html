@@ -129,6 +129,12 @@ async function loadSplitPack(onProgress) {
 	let done = 0;
 	const parts = await Promise.all(SPLIT_PCK.map(async (part) => {
 		const res = await fetch(part.name, { cache: 'force-cache' });
+		if (res.status === 404 && !sessionStorage.getItem('pckRetry')) {
+			// 快取的舊 index.html 指到已刪掉的切片：加參數強制重抓最新的網頁（只試一次）
+			sessionStorage.setItem('pckRetry', '1');
+			location.replace(location.pathname + '?v=' + Date.now());
+			await new Promise(() => {});
+		}
 		if (!res.ok) throw new Error('Failed to fetch ' + part.name + ': ' + res.status);
 		const reader = res.body.getReader();
 		const buf = [];
@@ -256,6 +262,7 @@ const engine = new Engine(GODOT_CONFIG);
 			}
 		};
 		sessionStorage.removeItem('coiReloads');
+		sessionStorage.removeItem('pckRetry');
 		// 同 Engine.startGame，只是 index.pck 改從記憶體預載：引擎初始化（下載 wasm）與資料包下載同時進行
 		Promise.all([engine.init(GODOT_CONFIG['executable']), loadSplitPack(onProgress)])
 			.then(([, pack]) => engine.preloadFile(pack.buffer, 'index.pck'))   // 傳 ArrayBuffer：preloadFile 會拿第一個參數當 fileSizes 的鍵（Uint8Array 轉字串會爆）
