@@ -67,6 +67,9 @@
 			if (typeof engine !== 'undefined' && engine.rtenv && engine.rtenv.HEAP8) b.wasm_mb = Math.round(engine.rtenv.HEAP8.length / 1048576);
 		} catch (e) { /* ignore */ }
 		if (window.__godotDiag) b.game = window.__godotDiag;
+		if (!session.build && typeof SPLIT_PCK !== 'undefined') {   // 版本：資料包切片的雜湊 + 哪一版（根目錄 = 多執行緒、nt/ = 單執行緒）
+			session.build = SPLIT_PCK[0].name.replace(/^.*index\.([0-9a-f]+)\..*$/, '$1') + (location.pathname.includes('/nt/') ? ' 單執行緒版' : ' 多執行緒版');
+		}
 		session.beats.push(b);
 		if (session.beats.length > MAX_BEATS) session.beats.shift();
 		save();
@@ -93,7 +96,8 @@
 			'上次開始：' + p.start + '，最後一筆紀錄距開始 ' + (p.beats.length ? p.beats[p.beats.length - 1].t : '?') + ' 秒\n' +
 			'裝置：' + p.ua + '\n' +
 			'裝置記憶體：' + (p.device_memory_gb || '?') + ' GB，CPU 執行緒：' + (p.cpu_threads || '?') + '，螢幕：' + p.screen +
-			'，多執行緒：' + (p.cross_origin_isolated ? '開' : '關') + '\n\n' +
+			'，多執行緒：' + (p.cross_origin_isolated ? '開' : '關') + '\n' +
+			'版本：' + (p.build || '?') + '\n\n' +
 			JSON.stringify({ beats: p.beats, errors: p.errors }, null, 1);
 		const wrap = document.createElement('div');
 		wrap.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.82);display:flex;' +
