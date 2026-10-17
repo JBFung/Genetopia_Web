@@ -92,6 +92,7 @@ body {
 		</style>
 		<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
 <link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
+<link rel="manifest" href="index.manifest.json">
 
 			<!-- CANVAS_CENTER_CSS_INJECTED -->
 		<style>
@@ -115,16 +116,18 @@ body {
 
 		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":208771948,"index.wasm":1508095},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.nothreads.wasm"],"godotPoolSize":4};
-const GODOT_THREADS_ENABLED = false;
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":169436492,"index.wasm":1601069},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.wasm"],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
+const GODOT_THREADS_ENABLED = true;
 
-// SPLIT_PCK_LOADER_INJECTED：index.pck 切片（GitHub 單檔 100 MB 上限），抓下來拼成 Blob 再交給引擎
-const SPLIT_PCK = [{name:"index.adc99c80c4.pck.000",size:94371840},{name:"index.adc99c80c4.pck.001",size:94371840},{name:"index.adc99c80c4.pck.002",size:20028268}];
+// SPLIT_PCK_LOADER_INJECTED：index.pck gzip 後切片（GitHub 單檔 100 MB 上限）。各片同時抓進記憶體，
+// 依序用 DecompressionStream 解壓到預先配置好的緩衝區，再用 preloadFile 交給引擎。
+// 全程不用 Blob：Chrome 在硬碟空間少時大 Blob 會讀失敗（Failed to fetch）
+const SPLIT_PCK = [{name:"index.7bd62663b8.pckgz.000",size:93982592}];
+const PCK_SIZE = 169436492;
 async function loadSplitPack(onProgress) {
 	const total = SPLIT_PCK.reduce((s, p) => s + p.size, 0);
 	let done = 0;
-	const chunks = [];
-	for (const part of SPLIT_PCK) {
+	const parts = await Promise.all(SPLIT_PCK.map(async (part) => {
 		const res = await fetch(part.name, { cache: 'force-cache' });
 		if (!res.ok) throw new Error('Failed to fetch ' + part.name + ': ' + res.status);
 		const reader = res.body.getReader();
@@ -136,9 +139,24 @@ async function loadSplitPack(onProgress) {
 			done += value.length;
 			onProgress(done, total);
 		}
-		chunks.push(new Blob(buf));
+		return buf;
+	}));
+	onProgress(0, 0);   // 解壓中：進度條改成不定
+	const chunks = parts.flat();
+	parts.length = 0;
+	let k = 0;
+	const src = new ReadableStream({ pull(c) { if (k < chunks.length) { c.enqueue(chunks[k]); chunks[k++] = null; } else { c.close(); } } });
+	const out = new Uint8Array(PCK_SIZE);
+	let pos = 0;
+	const reader = src.pipeThrough(new DecompressionStream('gzip')).getReader();
+	for (;;) {
+		const { done: end, value } = await reader.read();
+		if (end) break;
+		out.set(value, pos);
+		pos += value.length;
 	}
-	return { url: URL.createObjectURL(new Blob(chunks)), size: total };
+	if (pos !== PCK_SIZE) throw new Error('index.pck size mismatch: ' + pos + ' / ' + PCK_SIZE);
+	return out;
 }
 const engine = new Engine(GODOT_CONFIG);
 
@@ -202,23 +220,25 @@ const engine = new Engine(GODOT_CONFIG);
 				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
 			}
 			// There's a chance that installing the service worker would fix the issue
-			Promise.race([
-				serviceWorkerRegistrationPromise.then((registration) => {
-					if (registration != null) {
-						return Promise.reject(new Error('Service worker already exists.'));
-					}
-					return registration;
-				}).then(() => engine.installServiceWorker()),
-				// For some reason, `getRegistration()` can stall
-				new Promise((resolve) => {
-					setTimeout(() => resolve(), 2000);
-				}),
-			]).then(() => {
-				// Reload if there was no error.
-				window.location.reload();
-			}).catch((err) => {
-				console.error('Error while registering service worker:', err);
-			});
+			// COI_RELOAD_INJECTED：等 Service Worker 接管再重新整理（sessionStorage 計次，避免無限重新整理）
+			const tries = Number(sessionStorage.getItem('coiReloads') || '0');
+			if (tries >= 3) {
+				displayFailureNotice('Error\nCould not enable cross-origin isolation (please reload).\n' + missing.join('\n'));
+			} else {
+				const timeout = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+				// getRegistration() 有時會卡住（Godot 範本也這樣註明）：最多等 2 秒，之後直接註冊；再等 SW 接管（ready）最多 10 秒
+				Promise.race([serviceWorkerRegistrationPromise.catch(() => null), timeout(2000)])
+					.then((registration) => (registration ? registration : navigator.serviceWorker.register(GODOT_CONFIG['serviceWorker'])))
+					.then(() => Promise.race([navigator.serviceWorker.ready, timeout(10000)]))
+					.then(() => {
+						console.log('COI: service worker ready, reloading (' + (tries + 1) + ')');
+						sessionStorage.setItem('coiReloads', String(tries + 1));
+						window.location.reload();
+					}).catch((err) => {
+						console.error('Error while registering service worker:', err);
+						displayFailureNotice(String(err));
+					});
+			}
 		} else {
 			// Display the message as usual
 			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
@@ -235,11 +255,12 @@ const engine = new Engine(GODOT_CONFIG);
 				statusProgress.removeAttribute('max');
 			}
 		};
-		loadSplitPack(onProgress).then((pack) => engine.startGame({
-			'mainPack': pack.url,
-			'fileSizes': Object.assign({}, GODOT_CONFIG['fileSizes'], { [pack.url]: pack.size }),
-			'onProgress': onProgress,
-		})).then(() => {
+		sessionStorage.removeItem('coiReloads');
+		// 同 Engine.startGame，只是 index.pck 改從記憶體預載：引擎初始化（下載 wasm）與資料包下載同時進行
+		Promise.all([engine.init(GODOT_CONFIG['executable']), loadSplitPack(onProgress)])
+			.then(([, pack]) => engine.preloadFile(pack.buffer, 'index.pck'))   // 傳 ArrayBuffer：preloadFile 會拿第一個參數當 fileSizes 的鍵（Uint8Array 轉字串會爆）
+			.then(() => engine.start({ 'args': ['--main-pack', 'index.pck'].concat(GODOT_CONFIG['args'] || []), 'onProgress': onProgress }))
+			.then(() => {
 			setStatusMode('hidden');
 		}, displayFailureNotice);
 	}
