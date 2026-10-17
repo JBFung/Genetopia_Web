@@ -97,8 +97,9 @@
 			'裝置：' + p.ua + '\n' +
 			'裝置記憶體：' + (p.device_memory_gb || '?') + ' GB，CPU 執行緒：' + (p.cpu_threads || '?') + '，螢幕：' + p.screen +
 			'，多執行緒：' + (p.cross_origin_isolated ? '開' : '關') + '\n' +
-			'版本：' + (p.build || '?') + '\n\n' +
-			JSON.stringify({ beats: p.beats, errors: p.errors }, null, 1);
+			'版本：' + (p.build || '?') + '\n' +
+			'（紀錄由新到舊；貼上時被截斷也保留最後當機前的狀態）\n\n' +
+			JSON.stringify({ errors: p.errors.slice().reverse(), beats: p.beats.slice().reverse() }, null, 1);
 		const wrap = document.createElement('div');
 		wrap.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.82);display:flex;' +
 			'align-items:center;justify-content:center;padding:16px;font-family:sans-serif';
@@ -267,14 +268,14 @@ body {
 
 		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":170043736,"index.wasm":1508095},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.nothreads.wasm"],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":170049116,"index.wasm":1508095},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.nothreads.wasm"],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 
 // SPLIT_PCK_LOADER_INJECTED：index.pck gzip 後切片（GitHub 單檔 100 MB 上限）。各片同時抓進記憶體，
 // 依序用 DecompressionStream 解壓到預先配置好的緩衝區，再用 preloadFile 交給引擎。
 // 全程不用 Blob：Chrome 在硬碟空間少時大 Blob 會讀失敗（Failed to fetch）
-const SPLIT_PCK = [{name:"../index.50ea7794ad.pckgz.000",size:94371840},{name:"../index.50ea7794ad.pckgz.001",size:23426}];
-const PCK_SIZE = 170043736;
+const SPLIT_PCK = [{name:"../index.37e9fb89d1.pckgz.000",size:94371840},{name:"../index.37e9fb89d1.pckgz.001",size:30493}];
+const PCK_SIZE = 170049116;
 async function loadSplitPack(onProgress) {
 	const total = SPLIT_PCK.reduce((s, p) => s + p.size, 0);
 	let done = 0;
