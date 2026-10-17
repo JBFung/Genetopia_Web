@@ -1,6 +1,154 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
+		<script>
+// DIAG_INJECTED：網頁版當機診斷（tools/build_web.py 把這份檔案內嵌進 index.html 的 <head>）。
+// 每 5 秒把遊戲狀態（Godot 的 WebDiag 寫在 window.__godotDiag）連同瀏覽器記憶體存進 localStorage；
+// 正常關閉 / 重新整理會在 pagehide 標記「已正常結束」。下次打開時若上一個工作階段沒有正常結束（分頁被 Chrome
+// 因記憶體不足結束後重載、手機在背景被系統回收），就跳出報告，玩家按「複製」貼給開發者。資料只存在玩家瀏覽器裡，不上傳。
+(function () {
+	const KEY = 'genetopia_diag';
+	const MAX_BEATS = 24;      // 保留最近 24 筆（約 2 分鐘）
+	const MAX_ERRORS = 20;
+	const BEAT_MS = 5000;
+	let prev = null;
+	try { prev = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { prev = null; }
+
+	const nav = navigator;
+	const session = {
+		id: Date.now().toString(36),
+		state: 'running',          // running → closed（正常結束）；沒變成 closed 就是異常結束
+		start: new Date().toISOString(),
+		url: location.href,
+		ua: nav.userAgent,
+		device_memory_gb: nav.deviceMemory || null,
+		cpu_threads: nav.hardwareConcurrency || null,
+		screen: screen.width + 'x' + screen.height + ' @' + (window.devicePixelRatio || 1),
+		cross_origin_isolated: self.crossOriginIsolated === true,
+		visibility: document.visibilityState,
+		beats: [],
+		errors: [],
+	};
+
+	function save() {
+		try { localStorage.setItem(KEY, JSON.stringify(session)); } catch (e) { /* 儲存空間滿：放棄這一筆 */ }
+	}
+
+	function pushError(kind, msg) {
+		session.errors.push({ t: Math.round(performance.now() / 1000), kind: kind, msg: String(msg).slice(0, 400) });
+		if (session.errors.length > MAX_ERRORS) session.errors.shift();
+		save();
+	}
+
+	// 錯誤：未捕捉的例外、Promise 拒絕、console.error（Godot 的錯誤都走 console.error）
+	window.addEventListener('error', (e) => pushError('error', (e.message || '') + ' @' + (e.filename || '') + ':' + (e.lineno || '')));
+	window.addEventListener('unhandledrejection', (e) => pushError('rejection', e.reason && (e.reason.stack || e.reason)));
+	const origError = console.error.bind(console);
+	console.error = function () {
+		try { pushError('console', Array.from(arguments).map((a) => (a && a.stack) || String(a)).join(' ')); } catch (e) { /* ignore */ }
+		origError.apply(console, arguments);
+	};
+
+	async function beat() {
+		const b = { t: Math.round(performance.now() / 1000), vis: document.visibilityState };
+		if (performance.memory) {   // Chrome：JS heap（不含 wasm）
+			b.js_heap_mb = Math.round(performance.memory.usedJSHeapSize / 1048576);
+			b.js_limit_mb = Math.round(performance.memory.jsHeapSizeLimit / 1048576);
+		}
+		if (self.crossOriginIsolated && performance.measureUserAgentSpecificMemory && document.visibilityState === 'visible') {
+			try {   // 整個分頁（含 wasm、worker），量一次要幾秒，不等它
+				performance.measureUserAgentSpecificMemory().then((r) => {
+					b.page_mb = Math.round(r.bytes / 1048576);
+					save();
+				}).catch(() => {});
+			} catch (e) { /* ignore */ }
+		}
+		try {   // 引擎的 wasm 記憶體（Godot 正式版不提供自己的記憶體統計，從這裡看；只會變大不會縮）
+			if (typeof engine !== 'undefined' && engine.rtenv && engine.rtenv.HEAP8) b.wasm_mb = Math.round(engine.rtenv.HEAP8.length / 1048576);
+		} catch (e) { /* ignore */ }
+		if (window.__godotDiag) b.game = window.__godotDiag;
+		session.beats.push(b);
+		if (session.beats.length > MAX_BEATS) session.beats.shift();
+		save();
+	}
+
+	document.addEventListener('visibilitychange', () => {
+		session.visibility = document.visibilityState;
+		session.beats.push({ t: Math.round(performance.now() / 1000), vis: document.visibilityState, event: 'visibility' });
+		if (session.beats.length > MAX_BEATS) session.beats.shift();
+		save();
+	});
+	window.addEventListener('pagehide', () => { session.state = 'closed'; save(); });
+
+	function guess(p) {
+		if (p.visibility === 'hidden') return '頁面在背景時被瀏覽器 / 系統回收（手機切到其他 App 或鎖螢幕後常見）';
+		const last = p.beats.length ? p.beats[p.beats.length - 1] : null;
+		if (last && last.page_mb && last.page_mb > 1500) return '前景執行中分頁記憶體很高（' + last.page_mb + ' MB），很可能是記憶體不足被 Chrome 結束';
+		return '前景執行中分頁被結束（最可能是記憶體不足，或瀏覽器 / 顯示卡出錯）';
+	}
+
+	function showReport(p) {
+		const report = '【Genetopia 當機報告】\n' +
+			'推測原因：' + guess(p) + '\n' +
+			'上次開始：' + p.start + '，最後一筆紀錄距開始 ' + (p.beats.length ? p.beats[p.beats.length - 1].t : '?') + ' 秒\n' +
+			'裝置：' + p.ua + '\n' +
+			'裝置記憶體：' + (p.device_memory_gb || '?') + ' GB，CPU 執行緒：' + (p.cpu_threads || '?') + '，螢幕：' + p.screen +
+			'，多執行緒：' + (p.cross_origin_isolated ? '開' : '關') + '\n\n' +
+			JSON.stringify({ beats: p.beats, errors: p.errors }, null, 1);
+		const wrap = document.createElement('div');
+		wrap.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.82);display:flex;' +
+			'align-items:center;justify-content:center;padding:16px;font-family:sans-serif';
+		const box = document.createElement('div');
+		box.style.cssText = 'background:#2a2145;color:#fff;border-radius:12px;padding:16px;width:min(560px,100%);' +
+			'max-height:90vh;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,.5)';
+		const title = document.createElement('div');
+		title.textContent = '上一次遊戲沒有正常結束（頁面被重新載入）';
+		title.style.cssText = 'font-size:18px;font-weight:bold';
+		const hint = document.createElement('div');
+		hint.textContent = '按「複製報告」後貼給開發者，可以幫忙找出原因。';
+		hint.style.cssText = 'font-size:14px;opacity:.85';
+		const ta = document.createElement('textarea');
+		ta.value = report;
+		ta.readOnly = true;
+		ta.style.cssText = 'width:100%;height:40vh;font-size:11px;font-family:monospace;background:#120d22;color:#cfe;' +
+			'border:1px solid #6a5acd;border-radius:6px;padding:6px;box-sizing:border-box';
+		const row = document.createElement('div');
+		row.style.cssText = 'display:flex;gap:10px;justify-content:flex-end';
+		const btn = (label, bg) => {
+			const b = document.createElement('button');
+			b.textContent = label;
+			b.style.cssText = 'font-size:16px;padding:10px 18px;border:0;border-radius:8px;color:#fff;background:' + bg;
+			return b;
+		};
+		const copy = btn('複製報告', '#e8590c');
+		copy.onclick = async () => {
+			try {
+				await navigator.clipboard.writeText(report);
+			} catch (e) {   // 沒有剪貼簿權限：選取文字讓玩家自己複製
+				ta.focus();
+				ta.select();
+				document.execCommand && document.execCommand('copy');
+			}
+			copy.textContent = '已複製';
+		};
+		const close = btn('關閉', '#5c5470');
+		close.onclick = () => wrap.remove();
+		row.append(copy, close);
+		box.append(title, hint, ta, row);
+		wrap.append(box);
+		document.body.append(wrap);
+	}
+
+	// 上一個工作階段沒有正常結束、而且有跑起來（有心跳）才報告；被 COI / 資料包重抓的自動重新整理會先 pagehide → closed
+	if (prev && prev.state === 'running' && prev.beats && prev.beats.length > 0) {
+		window.addEventListener('DOMContentLoaded', () => showReport(prev));
+	}
+	save();
+	setInterval(beat, BEAT_MS);
+	window.genetopiaDiagReport = () => showReport(session);   // 開發用：主控台輸入 genetopiaDiagReport() 看目前的報告
+})();
+
+		</script>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, viewport-fit=cover">
 		<title>Genetopia (復刻原型)</title>
@@ -116,14 +264,14 @@ body {
 
 		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":169972356,"index.wasm":1601069},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.wasm"],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":169975624,"index.wasm":1601069},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.wasm"],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
 const GODOT_THREADS_ENABLED = true;
 
 // SPLIT_PCK_LOADER_INJECTED：index.pck gzip 後切片（GitHub 單檔 100 MB 上限）。各片同時抓進記憶體，
 // 依序用 DecompressionStream 解壓到預先配置好的緩衝區，再用 preloadFile 交給引擎。
 // 全程不用 Blob：Chrome 在硬碟空間少時大 Blob 會讀失敗（Failed to fetch）
-const SPLIT_PCK = [{name:"index.0dfe19bb34.pckgz.000",size:94371840},{name:"index.0dfe19bb34.pckgz.001",size:5908}];
-const PCK_SIZE = 169972356;
+const SPLIT_PCK = [{name:"index.512a80fe4f.pckgz.000",size:94371840},{name:"index.512a80fe4f.pckgz.001",size:12168}];
+const PCK_SIZE = 169975624;
 async function loadSplitPack(onProgress) {
 	const total = SPLIT_PCK.reduce((s, p) => s + p.size, 0);
 	let done = 0;
