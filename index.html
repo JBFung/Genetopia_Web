@@ -270,7 +270,7 @@ const GODOT_THREADS_ENABLED = true;
 // SPLIT_PCK_LOADER_INJECTED：index.pck gzip 後切片（GitHub 單檔 100 MB 上限）。各片同時抓進記憶體，
 // 依序用 DecompressionStream 解壓到預先配置好的緩衝區，再用 preloadFile 交給引擎。
 // 全程不用 Blob：Chrome 在硬碟空間少時大 Blob 會讀失敗（Failed to fetch）
-const SPLIT_PCK = [{name:"index.512a80fe4f.pckgz.000",size:94371840},{name:"index.512a80fe4f.pckgz.001",size:12168}];
+const SPLIT_PCK = [{name:"index.1bb737b517.pckgz.000",size:94371840},{name:"index.1bb737b517.pckgz.001",size:12424}];
 const PCK_SIZE = 169975624;
 async function loadSplitPack(onProgress) {
 	const total = SPLIT_PCK.reduce((s, p) => s + p.size, 0);
@@ -377,7 +377,7 @@ const engine = new Engine(GODOT_CONFIG);
 			// COI_RELOAD_INJECTED：等 Service Worker 接管再重新整理（sessionStorage 計次，避免無限重新整理）
 			const tries = Number(sessionStorage.getItem('coiReloads') || '0');
 			if (tries >= 3) {
-				displayFailureNotice('Error\nCould not enable cross-origin isolation (please reload).\n' + missing.join('\n'));
+				location.replace('nt/' + location.search);   // 開不了多執行緒：改用單執行緒版（NT_FALLBACK）
 			} else {
 				const timeout = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 				// getRegistration() 有時會卡住（Godot 範本也這樣註明）：最多等 2 秒，之後直接註冊；再等 SW 接管（ready）最多 10 秒
@@ -390,13 +390,15 @@ const engine = new Engine(GODOT_CONFIG);
 						window.location.reload();
 					}).catch((err) => {
 						console.error('Error while registering service worker:', err);
-						displayFailureNotice(String(err));
+						location.replace('nt/' + location.search);   // 註冊不了 SW：改用單執行緒版
 					});
 			}
 		} else {
 			// Display the message as usual
 			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
+			if (GODOT_THREADS_ENABLED) { location.replace('nt/' + location.search); } else {
 			displayFailureNotice(missingMsg + missing.join('\n'));
+			}
 		}
 	} else {
 		setStatusMode('progress');
