@@ -269,14 +269,14 @@ body {
 
 		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":176999332,"index.wasm":1601069},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.wasm"],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":177001572,"index.wasm":1601069},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.wasm"],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
 const GODOT_THREADS_ENABLED = true;
 
 // SPLIT_PCK_LOADER_INJECTED：index.pck gzip 後切片（GitHub 單檔 100 MB 上限）。各片同時抓進記憶體，
 // 依序用 DecompressionStream 解壓到預先配置好的緩衝區，再用 preloadFile 交給引擎。
 // 全程不用 Blob：Chrome 在硬碟空間少時大 Blob 會讀失敗（Failed to fetch）
-const SPLIT_PCK = [{name:"index.f2557251a1.pckgz.000",size:94371840},{name:"index.f2557251a1.pckgz.001",size:6931682}];
-const PCK_SIZE = 176999332;
+const SPLIT_PCK = [{name:"index.d270f4d3aa.pckgz.000",size:94371840},{name:"index.d270f4d3aa.pckgz.001",size:6931198}];
+const PCK_SIZE = 177001572;
 async function loadSplitPack(onProgress) {
 	const total = SPLIT_PCK.reduce((s, p) => s + p.size, 0);
 	let done = 0;
