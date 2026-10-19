@@ -268,42 +268,47 @@ body {
 
 		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":177048996,"index.wasm":1508095},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.nothreads.wasm"],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":177049012,"index.wasm":1508095},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.nothreads.wasm"],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 
-// SPLIT_PCK_LOADER_INJECTED：index.pck gzip 後切片（GitHub 單檔 100 MB 上限）。各片同時抓進記憶體，
-// 依序用 DecompressionStream 解壓到預先配置好的緩衝區，再用 preloadFile 交給引擎。
+// SPLIT_PCK_LOADER_INJECTED：index.pck gzip 後切片（GitHub 單檔 100 MB 上限）。各片依序串流下載、
+// 邊下載邊用 DecompressionStream 解壓到預先配置好的緩衝區（不先把壓縮切片整包留在記憶體：iPhone 載入時
+// 壓縮 97 MB + 解壓 169 MB 同時存在，分頁被 iOS 結束），解完由檔案系統直接接手（見 startGame 段）。
 // 全程不用 Blob：Chrome 在硬碟空間少時大 Blob 會讀失敗（Failed to fetch）
-const SPLIT_PCK = [{name:"../index.49fcee98fe.pckgz.000",size:94371840},{name:"../index.49fcee98fe.pckgz.001",size:6980585}];
-const PCK_SIZE = 177048996;
+const SPLIT_PCK = [{name:"../index.b2d61d961c.pckgz.000",size:94371840},{name:"../index.b2d61d961c.pckgz.001",size:6980684}];
+const PCK_SIZE = 177049012;
+async function openPart(part) {
+	const res = await fetch(part.name, { cache: 'force-cache' });
+	if (res.status === 404 && !sessionStorage.getItem('pckRetry')) {
+		// 快取的舊 index.html 指到已刪掉的切片：加參數強制重抓最新的網頁（只試一次）
+		sessionStorage.setItem('pckRetry', '1');
+		location.replace(location.pathname + '?v=' + Date.now());
+		await new Promise(() => {});
+	}
+	if (!res.ok) throw new Error('Failed to fetch ' + part.name + ': ' + res.status);
+	return res.body.getReader();
+}
 async function loadSplitPack(onProgress) {
 	const total = SPLIT_PCK.reduce((s, p) => s + p.size, 0);
 	let done = 0;
-	const parts = await Promise.all(SPLIT_PCK.map(async (part) => {
-		const res = await fetch(part.name, { cache: 'force-cache' });
-		if (res.status === 404 && !sessionStorage.getItem('pckRetry')) {
-			// 快取的舊 index.html 指到已刪掉的切片：加參數強制重抓最新的網頁（只試一次）
-			sessionStorage.setItem('pckRetry', '1');
-			location.replace(location.pathname + '?v=' + Date.now());
-			await new Promise(() => {});
+	let idx = 0;
+	let cur = null;
+	const src = new ReadableStream({
+		async pull(c) {
+			for (;;) {
+				if (!cur) {
+					if (idx >= SPLIT_PCK.length) { c.close(); return; }
+					cur = await openPart(SPLIT_PCK[idx++]);
+				}
+				const { done: end, value } = await cur.read();
+				if (end) { cur = null; continue; }
+				done += value.length;
+				onProgress(done, total);
+				c.enqueue(value);
+				return;
+			}
 		}
-		if (!res.ok) throw new Error('Failed to fetch ' + part.name + ': ' + res.status);
-		const reader = res.body.getReader();
-		const buf = [];
-		for (;;) {
-			const { done: end, value } = await reader.read();
-			if (end) break;
-			buf.push(value);
-			done += value.length;
-			onProgress(done, total);
-		}
-		return buf;
-	}));
-	onProgress(0, 0);   // 解壓中：進度條改成不定
-	const chunks = parts.flat();
-	parts.length = 0;
-	let k = 0;
-	const src = new ReadableStream({ pull(c) { if (k < chunks.length) { c.enqueue(chunks[k]); chunks[k++] = null; } else { c.close(); } } });
+	});
 	const out = new Uint8Array(PCK_SIZE);
 	let pos = 0;
 	const reader = src.pipeThrough(new DecompressionStream('gzip')).getReader();
@@ -417,7 +422,15 @@ const engine = new Engine(GODOT_CONFIG);
 		sessionStorage.removeItem('pckRetry');
 		// 同 Engine.startGame，只是 index.pck 改從記憶體預載：引擎初始化（下載 wasm）與資料包下載同時進行
 		Promise.all([engine.init(GODOT_CONFIG['executable']), loadSplitPack(onProgress)])
-			.then(([, pack]) => engine.preloadFile(pack.buffer, 'index.pck'))   // 傳 ArrayBuffer：preloadFile 會拿第一個參數當 fileSizes 的鍵（Uint8Array 轉字串會爆）
+			.then(([, pack]) => {
+				// 檔案系統直接接手這塊記憶體（canOwn）：preloadFile 在啟動時會再複製一份 169 MB，iPhone 撐不住
+				const fs = engine.rtenv && engine.rtenv['FS'];
+				if (fs) {
+					fs.writeFile('index.pck', pack, { canOwn: true });
+					return null;
+				}
+				return engine.preloadFile(pack.buffer, 'index.pck');   // 傳 ArrayBuffer：preloadFile 會拿第一個參數當 fileSizes 的鍵（Uint8Array 轉字串會爆）
+			})
 			.then(() => engine.start({ 'args': ['--main-pack', 'index.pck'].concat(GODOT_CONFIG['args'] || []), 'onProgress': onProgress }))
 			.then(() => {
 			setStatusMode('hidden');
