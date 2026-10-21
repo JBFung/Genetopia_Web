@@ -4,7 +4,7 @@
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1792542763|139500234';
+const CACHE_VERSION = '1792601628|166249168';
 /** @type {string} */
 const CACHE_PREFIX = 'Genetopia (復刻原型)-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
