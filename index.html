@@ -269,15 +269,15 @@ body {
 
 		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":198164748,"index.wasm":1601069},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.wasm"],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":198165084,"index.wasm":1601069},"focusCanvas":true,"gdextensionLibs":["libspine_godot.web.template_release.wasm32.wasm"],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
 const GODOT_THREADS_ENABLED = true;
 
 // SPLIT_PCK_LOADER_INJECTED：index.pck gzip 後切片（GitHub 單檔 100 MB 上限）。各片依序串流下載、
 // 邊下載邊用 DecompressionStream 解壓到預先配置好的緩衝區（不先把壓縮切片整包留在記憶體：iPhone 載入時
 // 壓縮 97 MB + 解壓 169 MB 同時存在，分頁被 iOS 結束），解完由檔案系統直接接手（見 startGame 段）。
 // 全程不用 Blob：Chrome 在硬碟空間少時大 Blob 會讀失敗（Failed to fetch）
-const SPLIT_PCK = [{name:"index.02b2ed7734.pckgz.000",size:94371840},{name:"index.02b2ed7734.pckgz.001",size:26763532}];
-const PCK_SIZE = 198164748;
+const SPLIT_PCK = [{name:"index.fed2604ecd.pckgz.000",size:94371840},{name:"index.fed2604ecd.pckgz.001",size:26764085}];
+const PCK_SIZE = 198165084;
 async function openPart(part) {
 	const res = await fetch(part.name, { cache: 'force-cache' });
 	if (res.status === 404 && !sessionStorage.getItem('pckRetry')) {
